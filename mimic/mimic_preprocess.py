@@ -121,7 +121,7 @@ df['diagnosis'] = df['diagnosis'].astype(str).replace({r'\\': ',', '/': ','}, re
 print("\nSample of cleaned diagnoses:")
 print(df['diagnosis'].head())
 
-df.to_csv('mp_los_age_category.csv',index=False)
+df.to_csv('preprocess.csv',index=False)
 
 
 
