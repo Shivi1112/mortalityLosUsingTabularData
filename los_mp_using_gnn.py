@@ -61,7 +61,7 @@ for files in csv_files:
 
 
 
-merged_data = pd.read_csv(os.path.join(folder, "mp_los_age_category.csv" ))
+merged_data = pd.read_csv(os.path.join(folder, "preprocess.csv" ))
 
 
 diagnoses_icd = pd.read_csv(os.path.join(folder, "DIAGNOSES_ICD.csv.gz" ), compression="gzip")
