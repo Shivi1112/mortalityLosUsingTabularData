@@ -321,15 +321,15 @@ def train_and_evaluate(model, data, device, epochs=500, patience=50):
         # Calculate metrics
         mortality_metrics = {
             'accuracy': accuracy_score(test_mortality_true_cpu, test_mortality_pred_cpu),
-            'precision': precision_score(test_mortality_true_cpu, test_mortality_pred_cpu),
-            'recall': recall_score(test_mortality_true_cpu, test_mortality_pred_cpu),
-            'f1': f1_score(test_mortality_true_cpu, test_mortality_pred_cpu)
+#             'precision': precision_score(test_mortality_true_cpu, test_mortality_pred_cpu),
+#             'recall': recall_score(test_mortality_true_cpu, test_mortality_pred_cpu),
+            'f1': f1_score(test_mortality_true_cpu, test_mortality_pred_cpu, average='macro')
         }
 
         los_metrics = {
             'accuracy': accuracy_score(test_los_true_cpu, test_los_pred_cpu),
-            'macro_f1': f1_score(test_los_true_cpu, test_los_pred_cpu, average='macro'),
-            'weighted_f1': f1_score(test_los_true_cpu, test_los_pred_cpu, average='weighted')
+            'f1': f1_score(test_los_true_cpu, test_los_pred_cpu, average='macro'),
+#             'f1': f1_score(test_los_true_cpu, test_los_pred_cpu, average='weighted')
         }
 
         print("\n=== Mortality Prediction Results ===")
@@ -384,7 +384,7 @@ def main():
             "mortality_accuracy": float(results['accuracy']),  # Updated to match new metrics
             "mortality_f1": float(results['f1']),
             "los_accuracy": float(results['accuracy']),
-            "los_macro_f1": float(results['macro_f1'])
+            "los_f1": float(results['f1'])
         }
 
         with open(results_path, 'w') as f:
