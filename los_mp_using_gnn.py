@@ -146,11 +146,9 @@ def preprocess_healthcare_data(df):
     # Convert column names to lowercase
     df.columns = df.columns.str.lower()
   
-    df=df.drop(['admittime','dischtime','discharge_location','diagnosis'],axis=1)
+    df=df.drop(['admittime','dischtime','discharge_location','diagnosis','religion','ethnicity','insurance'],axis=1)
     # Fill categorical columns with most frequent values
-    categorical_cols = ['admission_type', 'admission_location', 
-                       'insurance', 'language', 'religion', 'marital_status',
-                       'ethnicity', 'gender']
+    categorical_cols = ['admission_type', 'admission_location', 'language', 'marital_status', 'gender']
 
     for col in categorical_cols:
         if col in df.columns:
