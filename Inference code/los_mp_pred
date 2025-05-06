@@ -1,1 +1,133 @@
+import torch
+import torch.nn.functional as F
+# from los_mp_using_gnn import LOSPredictionModel  # or whatever your model class is
+from torch_geometric.loader import DataLoader
+from sklearn.metrics import classification_report
+import pickle
+import pandas as pd
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+from sklearn.metrics.pairwise import cosine_similarity
+from torch_geometric.data import Data
+from torch_geometric.nn import GATConv
+import numpy as np
+import pandas as pd
+import os
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.data import Data
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics.pairwise import cosine_similarity
+import pickle
+import datetime
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
+
+
+# Define the GAT model architecture
+class GATModel(nn.Module):
+    def __init__(self, in_features, hidden_dim=64, num_heads=2):
+        super(GATModel, self).__init__()
+        self.conv1 = GATConv(in_features, hidden_dim, heads=num_heads, dropout=0.2)
+        self.conv2 = GATConv(hidden_dim * num_heads, hidden_dim, heads=1, dropout=0.2)
+        self.mortality_out = nn.Linear(hidden_dim, 1)  # Mortality prediction (binary)
+        self.los_out = nn.Linear(hidden_dim, 4)        # LOS prediction (4-class)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+        mortality_pred = self.mortality_out(x)
+        los_pred = self.los_out(x)
+        return mortality_pred, los_pred
+
+# Preprocess data for inference (excludes target columns)
+def preprocess_for_inference(df):
+    df = df.copy()
+    df.columns = df.columns.str.lower()
+    # Drop unnecessary columns
+    cols_to_drop = ['admittime', 'dischtime', 'discharge_location', 'diagnosis', 
+                    'religion', 'ethnicity', 'insurance', 'hospital_expire_flag', 'los']
+    df = df.drop([col for col in cols_to_drop if col in df.columns], axis=1)
+    # Handle categorical columns
+    categorical_cols = ['admission_type', 'admission_location', 'language', 'marital_status', 'gender']
+    for col in categorical_cols:
+        if col in df.columns:
+            df[col] = df[col].fillna(df[col].mode()[0])
+    # Generate dummy variables
+    dummies_icd = pd.get_dummies(df['icd9_code'], prefix='icd9')
+    dummies_cat = pd.get_dummies(df[categorical_cols], prefix=categorical_cols)
+    # Combine features
+    df_processed = pd.concat([df[['subject_id', 'hadm_id']], dummies_icd, dummies_cat], axis=1)
+    # Aggregate by admission
+    agg_dict = {col: 'sum' for col in dummies_icd.columns.union(dummies_cat.columns)}
+    df_grouped = df_processed.groupby(['subject_id', 'hadm_id']).agg(agg_dict).reset_index()
+    return df_grouped
+
+# Create graph data from preprocessed DataFrame
+def create_inference_graph(df_processed, scaler):
+    # Extract numeric features
+    X=df_processed
+#     X = df_processed.drop(['subject_id', 'hadm_id'], axis=1).select_dtypes(include=np.number)
+    X_scaled = scaler.transform(X)
+    # Build edges using cosine similarity
+    sim_matrix = cosine_similarity(X_scaled)
+    edge_index = []
+    k = 5
+    for i in range(sim_matrix.shape[0]):
+        neighbors = np.argsort(sim_matrix[i])[-k-1:-1]
+        for j in neighbors:
+            edge_index.extend([[i, j], [j, i]])
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    # Create PyG Data object
+    data = Data(
+        x=torch.tensor(X_scaled, dtype=torch.float32),
+        edge_index=edge_index,
+        y_mortality=torch.zeros(len(df_processed)),  # Dummy tensors
+        y_los=torch.zeros(len(df_processed)),        # (not used in prediction)
+        num_nodes=len(df_processed)
+    )
+    return data
+
+# Load saved model and scaler
+def load_model_scaler(model_dir='gat_models', device='cpu'):
+    with open(os.path.join(model_dir, 'standard_scaler.pkl'), 'rb') as f:
+        scaler = pickle.load(f)
+    model_data = torch.load(os.path.join(model_dir, 'gat_model.pt'), map_location=device)
+    model = GATModel(model_data['input_dim'])
+    model.load_state_dict(model_data['model_state_dict'])
+    model.to(device).eval()
+    return model, scaler
+
+# Main inference pipeline
+def predict(csv_path, output_path='predictions.csv', model_dir='gat_models'):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # Load and preprocess data
+    df_raw = pd.read_csv(csv_path)
+    folder="mimic"
+    diagnoses_icd = pd.read_csv(os.path.join(folder, "DIAGNOSES_ICD.csv.gz" ), compression="gzip")
+    diagnoses_icd.columns = diagnoses_icd.columns.str.lower()
+    merged_data = pd.merge(df_raw , diagnoses_icd , on=["subject_id", "hadm_id"])
+    df_processed = preprocess_for_inference(merged_data)
+    # Load model components
+    model, scaler = load_model_scaler(model_dir, device)
+    # Create graph
+    graph_data = create_inference_graph(df_processed, scaler).to(device)
+    # Generate predictions
+    with torch.no_grad():
+        mortality_logits, los_logits = model(graph_data.x, graph_data.edge_index)
+        mortality_probs = torch.sigmoid(mortality_logits).cpu().numpy().squeeze()
+        los_preds = torch.argmax(los_logits, dim=1).cpu().numpy()
+    # Format output
+    results = df_processed[['subject_id', 'hadm_id']].copy()
+    results['mortality_probability'] = mortality_probs
+    results['los_prediction'] = los_preds
+    results.to_csv(output_path, index=False)
+    print(f"Predictions saved to {output_path}")
+
+if __name__ == "__main__":
+    predict("mimic/preprocess.csv")  # Replace with your CSV path
 
